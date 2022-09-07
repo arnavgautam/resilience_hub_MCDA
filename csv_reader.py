@@ -8,7 +8,7 @@ class CsvReader():
 
     def compile_power_timeseries(self, casename, start, end, data_folder: Path):
         for hour in range(start,end):
-            filepath = data_folder.joinpath(f"{casename}_power_{hour}.csv")
+            filepath = data_folder.joinpath(f"{casename}_{hour}_power.csv")
             power_data = read_csv(filepath)
             gen_bus, gen_type, gen_P, gen_Q  = power_data[power_data['P(MW)'] == power_data.min()['P(MW)']].iloc[0]
             slack_bus, slack_type, slack_P, slack_Q  = power_data[power_data['name'] == 'Slack'].iloc[0]
