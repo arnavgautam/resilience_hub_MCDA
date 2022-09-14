@@ -12,14 +12,18 @@ class RHOptionPlotter():
         max_val = plot_data.max()
 
         normalized_plot_data=(plot_data-min_val)/(max_val-min_val)
-        normalized_plot_data.fillna(0)
+        normalized_plot_data.fillna(0, inplace=True)
 
         figure_data = []
         for system_description, tech_data in normalized_plot_data.iterrows():
             figure_data.append(go.Scatter(
                 x = plot_data.columns.values,
                 y = tech_data,
-                name = system_description
+                name = system_description,
+                # hovertemplate="D: %{plot_data.loc[system_description]}"
+                # hoverinfo=f"{plot_data.loc[system_description]}"
+                hoverlabel={"namelength":-1},
+                hovertext=plot_data.loc[system_description]
             ))
 
         self.fig = go.Figure(
