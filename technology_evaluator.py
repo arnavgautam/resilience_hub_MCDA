@@ -1,16 +1,19 @@
 from math import ceil
+from pathlib import Path
 import numpy as np
-from pandas import DataFrame
+from pandas import concat, DataFrame
 import pareto
 
-from constant import CO2_INTENSITY, DIESEL_POWER_OUTPUT, FIXED_COSTS, NOX_AIR_POLLUTANT_INTENSITY, PM_AIR_POLLUTANT_INTENSITY, SO2_AIR_POLLUTANT_INTENSITY, PVWATTS_HOURLY_8760, SOFC_POWER_OUTPUT, STORAGE_ENERGY_CAPACITY, STORAGE_MAX_DISCHARGE_RATE, TECH_LABELS, VARIABLE_COSTS, Technology, STORAGE_ENERGY_CAPACITY, STORAGE_MAX_DISCHARGE_RATE, TECH_LABELS, VARIABLE_COSTS, Technology
+from constant import CO2_INTENSITY, CRITERIA, DIESEL_POWER_OUTPUT, FIXED_COSTS, NOX_AIR_POLLUTANT_INTENSITY, PM_AIR_POLLUTANT_INTENSITY, SO2_AIR_POLLUTANT_INTENSITY, PVWATTS_HOURLY_8760, SOFC_POWER_OUTPUT, STORAGE_ENERGY_CAPACITY, STORAGE_MAX_DISCHARGE_RATE, TECH_LABELS, VARIABLE_COSTS, Technology, STORAGE_ENERGY_CAPACITY, STORAGE_MAX_DISCHARGE_RATE, TECH_LABELS, VARIABLE_COSTS, Technology
 
 class TechnologyEvaluator():
 
-    def __init__(self, categories = ['Economic Cost', 'CO2 Pollution', 'NOx Air Pollution', 'PM Air Pollution', 'SO2 Air Pollution', 'CNSP', 'EWOMP'], CNSP_THRESHOLD = 0.2):
+    def __init__(self, categories = CRITERIA, CNSP_THRESHOLD = 0.2):
         self.categories = categories
         self.CNSP_THRESHOLD = CNSP_THRESHOLD
         self.tech_criteria_data = DataFrame(columns = self.categories)
+        self.oversized_tech_criteria_data = DataFrame(columns = self.categories)
+        self.CNSP_failing_tech_criteria_data = DataFrame(columns = self.categories)
         self.tech_output_timeseries = dict()
 
     def compile_tech_outputs(self, start, end):
@@ -33,21 +36,16 @@ class TechnologyEvaluator():
         NOx_air_pollutant_emissions = total_kW_gen * NOX_AIR_POLLUTANT_INTENSITY[tech]
         PM_air_pollutant_emissions = total_kW_gen * PM_AIR_POLLUTANT_INTENSITY[tech]
         SO2_air_pollutant_emissions = total_kW_gen * SO2_AIR_POLLUTANT_INTENSITY[tech]
-        # social_benefit = total_kWh
-        tech_data = [fixed_cost + variable_cost, co2_emissions, NOx_air_pollutant_emissions, PM_air_pollutant_emissions, SO2_air_pollutant_emissions]#, social_benefit]
+        tech_data = [fixed_cost + variable_cost, co2_emissions, NOx_air_pollutant_emissions, PM_air_pollutant_emissions, SO2_air_pollutant_emissions]
         return np.array(tech_data)
     
     def evaluate_technologies(self, kW_gen_data, hourly_EWOMP, technology_sets):
-        failed_systems_CNSPs = list()
+        CNSP_failing_systems = list()
+        overlarge_systems = list()
         for tech_set in technology_sets:
             individual_tech_outputs = dict()
             system_output = self.get_system_output_timeseries(tech_set, kW_gen_data, individual_tech_outputs)
-            EWOMP = self.get_EWOMP(system_output, kW_gen_data, hourly_EWOMP)
-            customer_not_supplied_probability = self.get_customer_not_supplied_probability(system_output, kW_gen_data)
-            if customer_not_supplied_probability > self.CNSP_THRESHOLD:
-                failed_systems_CNSPs.append(customer_not_supplied_probability)
-                continue
-
+            
             combined_data = None
             for tech, tech_number_of_systems in tech_set.items():
                 tech_data = self.gather_tech_performance(tech, tech_number_of_systems, sum(individual_tech_outputs[tech]))
@@ -56,11 +54,27 @@ class TechnologyEvaluator():
                 else:
                     combined_data = np.add(combined_data, tech_data)
             
+            customer_not_supplied_probability = self.get_customer_not_supplied_probability(system_output, kW_gen_data)
+            EWOMP = self.get_EWOMP(system_output, kW_gen_data, hourly_EWOMP)
             combined_data = np.append(combined_data, customer_not_supplied_probability)
             combined_data = np.append(combined_data, -EWOMP)
 
-            self.tech_criteria_data.loc[' & '.join([f'{tech_set[tech]} {tech}' + ('s' if tech_set[tech] > 1 else '') for tech in tech_set])] = combined_data
-        return failed_systems_CNSPs
+            system_label = ' & '.join([f'{tech_set[tech]} {TECH_LABELS[tech]}' + ('s' if False and tech_set[tech] > 1 else '') for tech in tech_set])
+            
+            if self.system_is_oversized(system_output, kW_gen_data, multiplier = 1.1):
+                overlarge_systems.append(tech_set)
+                self.oversized_tech_criteria_data.loc[system_label] = combined_data
+                continue
+            if customer_not_supplied_probability > self.CNSP_THRESHOLD:
+                CNSP_failing_systems.append(tech_set)
+                self.CNSP_failing_tech_criteria_data.loc[system_label] = combined_data
+                continue
+
+            self.tech_criteria_data.loc[system_label] = combined_data
+        return CNSP_failing_systems, overlarge_systems
+    
+    def system_is_oversized(self, system_output, kW_gen_data, multiplier = 1.5):
+        return np.all(system_output > multiplier * np.array(kW_gen_data))
 
     def get_system_output_timeseries(self, tech_set, kW_gen_data, individual_tech_outputs):
         system_output = np.zeros(len(kW_gen_data))
@@ -150,4 +164,15 @@ class TechnologyEvaluator():
         column_list = ["Name", *self.tech_criteria_data.columns.values]
         # convert multi-dimension array to DataFrame
         self.non_dominated_options = DataFrame.from_records(self.non_dominated_options, columns=column_list, index="Name")
+    
+    def save(self, filepath):
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+        all_option_filepath = Path(filepath + "_all.csv")
+        self.tech_criteria_data.to_csv(all_option_filepath)
+        nd_option_filepath = Path(filepath + "_nd.csv")
+        self.non_dominated_options.to_csv(nd_option_filepath)
+        generated_option_filepath = Path(filepath + "_generated.csv")
+        generated_data = concat([self.tech_criteria_data, self.CNSP_failing_tech_criteria_data, self.oversized_tech_criteria_data])
+        generated_data.to_csv(generated_option_filepath)
+
         
