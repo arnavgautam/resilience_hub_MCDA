@@ -160,6 +160,9 @@ class TechnologyEvaluator():
         #         f'{tech2_number_of_systems} {TECH_LABELS[tech2]}' + ('s' if tech2_number_of_systems > 1 else '')] = combined_data
     
     def find_non_dominated_options(self):
+        if len(self.tech_criteria_data) == 0:
+            self.non_dominated_options = self.tech_criteria_data
+            return
         self.non_dominated_options = pareto.eps_sort([list(self.tech_criteria_data.itertuples())], list(self.tech_criteria_data.columns.map(self.tech_criteria_data.columns.get_loc).values + 1))
         column_list = ["Name", *self.tech_criteria_data.columns.values]
         # convert multi-dimension array to DataFrame

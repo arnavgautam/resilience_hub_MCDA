@@ -1,29 +1,35 @@
 import plotly.graph_objects as go
 import plotly.offline as pyo
 
+from constant import CRITERIA
+
 class RHOptionPlotter():
 
     def __init__(self):
         self.fig = None
 
-    def plot(self, plot_data):
+    def plot(self, plot_data, no_sox_no2=False):
+        if no_sox_no2:
+            plot_data.drop(columns=[CRITERIA[2],CRITERIA[4]], inplace=True)
         # TODO confirm that pandas column-wise min and max are giving the correct normalization result for the figure
         min_val = plot_data.min()
         max_val = plot_data.max()
 
-        normalized_plot_data=(plot_data-min_val)/(max_val-min_val)
+        normalized_plot_data=(max_val-plot_data)/(max_val-min_val)
         normalized_plot_data.fillna(0, inplace=True)
+        # if no_sox_no2:
+        #     normalized_plot_data.drop(columns=[CRITERIA[2],CRITERIA[4]], inplace=True)
 
         figure_data = []
         for system_description, tech_data in normalized_plot_data.iterrows():
             figure_data.append(go.Scatter(
-                x = plot_data.columns.values,
+                x = normalized_plot_data.columns.values,
                 y = tech_data,
                 name = system_description,
                 # hovertemplate="D: %{plot_data.loc[system_description]}"
                 # hoverinfo=f"{plot_data.loc[system_description]}"
                 hoverlabel={"namelength":-1},
-                hovertext=plot_data.loc[system_description]
+                hovertext=abs(plot_data.loc[system_description])
             ))
 
         self.fig = go.Figure(
