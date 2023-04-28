@@ -4,6 +4,7 @@ import numpy as np
 from pandas import concat, DataFrame
 import pareto
 
+import time
 from constant import CO2_INTENSITY, CRITERIA, DIESEL_POWER_OUTPUT, FIXED_COSTS, NOX_AIR_POLLUTANT_INTENSITY, PM_AIR_POLLUTANT_INTENSITY, SO2_AIR_POLLUTANT_INTENSITY, PVWATTS_HOURLY_8760, SOFC_POWER_OUTPUT, STORAGE_ENERGY_CAPACITY, STORAGE_MAX_DISCHARGE_RATE, TECH_LABELS, VARIABLE_COSTS, Technology, STORAGE_ENERGY_CAPACITY, STORAGE_MAX_DISCHARGE_RATE, TECH_LABELS, VARIABLE_COSTS, Technology
 
 class TechnologyEvaluator():
@@ -12,7 +13,6 @@ class TechnologyEvaluator():
         self.categories = categories
         self.CNSP_THRESHOLD = CNSP_THRESHOLD
         self.tech_criteria_data = DataFrame(columns = self.categories)
-        self.oversized_tech_criteria_data = DataFrame(columns = self.categories)
         self.CNSP_failing_tech_criteria_data = DataFrame(columns = self.categories)
         self.tech_output_timeseries = dict()
 
@@ -29,52 +29,48 @@ class TechnologyEvaluator():
         
         # self.POWER_OUTPUTS = {Technology.SOLAR_STORAGE:self.SOLAR_STORAGE_POWER_OUTPUT, Technology.SOFC:SOFC_POWER_OUTPUT, Technology.DIESEL: DIESEL_POWER_OUTPUT}
 
-    def gather_tech_performance(self, tech, number_of_systems, total_kW_gen):
+    def gather_tech_performance(self, tech, number_of_systems, tech_kW_gen, system_total_output):
         fixed_cost = number_of_systems * FIXED_COSTS[tech]
-        variable_cost = total_kW_gen * VARIABLE_COSTS[tech]
-        co2_emissions = total_kW_gen * CO2_INTENSITY[tech]
-        NOx_air_pollutant_emissions = total_kW_gen * NOX_AIR_POLLUTANT_INTENSITY[tech]
-        PM_air_pollutant_emissions = total_kW_gen * PM_AIR_POLLUTANT_INTENSITY[tech]
-        SO2_air_pollutant_emissions = total_kW_gen * SO2_AIR_POLLUTANT_INTENSITY[tech]
-        tech_data = [fixed_cost + variable_cost, co2_emissions, NOx_air_pollutant_emissions, PM_air_pollutant_emissions, SO2_air_pollutant_emissions]
+        variable_cost = tech_kW_gen * VARIABLE_COSTS[tech]
+        c_econ = (fixed_cost + variable_cost)/system_total_output
+        co2_emissions = (tech_kW_gen * CO2_INTENSITY[tech]) / system_total_output
+        NOx_air_pollutant_emissions = (tech_kW_gen * NOX_AIR_POLLUTANT_INTENSITY[tech]) / system_total_output
+        PM_air_pollutant_emissions = (tech_kW_gen * PM_AIR_POLLUTANT_INTENSITY[tech]) / system_total_output
+        SO2_air_pollutant_emissions = (tech_kW_gen * SO2_AIR_POLLUTANT_INTENSITY[tech]) / system_total_output
+        tech_data = [c_econ, co2_emissions, NOx_air_pollutant_emissions, PM_air_pollutant_emissions, SO2_air_pollutant_emissions]
         return np.array(tech_data)
     
-    def evaluate_technologies(self, kW_gen_data, hourly_EWOMP, technology_sets):
+    def evaluate_technologies(self, kW_gen_data, hourly_loads, EWOMP_factors, technology_sets, gamma):
+        evaluation_start_time = time.perf_counter()
         CNSP_failing_systems = list()
-        overlarge_systems = list()
         for tech_set in technology_sets:
             individual_tech_outputs = dict()
             system_output = self.get_system_output_timeseries(tech_set, kW_gen_data, individual_tech_outputs)
             
+            customer_not_supplied_probability = self.get_customer_not_supplied_probability(system_output, kW_gen_data)
             combined_data = None
             for tech, tech_number_of_systems in tech_set.items():
-                tech_data = self.gather_tech_performance(tech, tech_number_of_systems, sum(individual_tech_outputs[tech]))
+                tech_data = self.gather_tech_performance(tech, tech_number_of_systems, sum(individual_tech_outputs[tech]), sum(system_output))
                 if combined_data is None:
                     combined_data = tech_data
                 else:
                     combined_data = np.add(combined_data, tech_data)
             
-            customer_not_supplied_probability = self.get_customer_not_supplied_probability(system_output, kW_gen_data)
-            EWOMP = self.get_EWOMP(system_output, kW_gen_data, hourly_EWOMP)
+            EWOMP = self.get_EWOMP(system_output, kW_gen_data, hourly_loads, EWOMP_factors, gamma)
             combined_data = np.append(combined_data, customer_not_supplied_probability)
             combined_data = np.append(combined_data, -EWOMP)
 
             system_label = ' & '.join([f'{tech_set[tech]} {TECH_LABELS[tech]}' + ('s' if False and tech_set[tech] > 1 else '') for tech in tech_set])
             
-            if self.system_is_oversized(system_output, kW_gen_data, multiplier = 1.1):
-                overlarge_systems.append(tech_set)
-                self.oversized_tech_criteria_data.loc[system_label] = combined_data
-                continue
             if customer_not_supplied_probability > self.CNSP_THRESHOLD:
                 CNSP_failing_systems.append(tech_set)
                 self.CNSP_failing_tech_criteria_data.loc[system_label] = combined_data
                 continue
 
             self.tech_criteria_data.loc[system_label] = combined_data
-        return CNSP_failing_systems, overlarge_systems
-    
-    def system_is_oversized(self, system_output, kW_gen_data, multiplier = 1.5):
-        return np.all(system_output > multiplier * np.array(kW_gen_data))
+        
+        print(f"Evaluation took {time.perf_counter() - evaluation_start_time} seconds")
+        return CNSP_failing_systems
 
     def get_system_output_timeseries(self, tech_set, kW_gen_data, individual_tech_outputs):
         system_output = np.zeros(len(kW_gen_data))
@@ -107,57 +103,25 @@ class TechnologyEvaluator():
         customer_not_supplied_probability = lost_load_hours / len(kW_gen_data)
         return customer_not_supplied_probability
     
-    def get_EWOMP(self, system_output, kW_gen_data, hourly_EWOMP):
-        successful_hours = np.where(system_output >= kW_gen_data)[0]
-        return sum(hourly_EWOMP[hour] for hour in successful_hours)
-
-
-
-        # # First determine how single-technologies setups would fare
-        # for tech in Technology:
-        #     number_of_systems = ceil(max(kW_gen_data) / self.POWER_OUTPUTS[tech])
-        #     if tech is Technology.SOLAR_STORAGE and number_of_systems*self.SOLAR_STORAGE_POWER_OUTPUT < total_kW_gen:
-        #         # If peak solar generation is enough but overall energy generation is not enough
-        #         number_of_systems = max(number_of_systems, ceil(total_kW_gen / self.SOLAR_STORAGE_ENERGY_OUTPUT))
-
-        #     tech_data = self.gather_tech_performance(tech, number_of_systems, total_kW_gen)
-
-        #     self.tech_criteria_data.loc[f'{number_of_systems} {TECH_LABELS[tech]}' + ('s' if number_of_systems > 1 else '')] = tech_data
-                
-
-        # # Next, determine how two-technology setups would fare. One main technology, one for additional generation needed
-        # for tech in Technology:
-        #     tech1, tech2 = [option for option in Technology if option is not tech]
-
-        #     # Tech1 as main generating option
-        #     tech1_number_of_systems = max(kW_gen_data) // self.POWER_OUTPUTS[tech1]
-
-        #     if tech1_number_of_systems == 0:
-        #         continue
-
-        #     tech1_kW_gen_data = np.copy(kW_gen_data)
-        #     if tech1 is Technology.SOLAR_STORAGE:
-        #         # Power output always stays under possible generation (depending on solar production in that hour)
-        #         tech1_kW_gen_data = np.minimum(tech1_kW_gen_data, tech1_number_of_systems*self.SOLAR_OUTPUT)
-        #         if tech1_number_of_systems*self.SOLAR_STORAGE_ENERGY_OUTPUT < sum(tech1_kW_gen_data):
-        #             # If peak solar generation is enough but overall energy generation is not enough
-        #             tech1_number_of_systems = max(tech1_number_of_systems, ceil(sum(tech1_kW_gen_data) / self.SOLAR_STORAGE_ENERGY_OUTPUT))
-        #     else:
-        #         # Power output always stays under possible generation (not time-dependent)
-        #         tech1_kW_gen_data[tech1_kW_gen_data > tech1_number_of_systems*self.POWER_OUTPUTS[tech1]] = tech1_number_of_systems*self.POWER_OUTPUTS[tech1]
-
-        #     tech2_kW_gen_data = kW_gen_data - tech1_kW_gen_data
-        #     tech2_number_of_systems = ceil(max(tech2_kW_gen_data) / self.POWER_OUTPUTS[tech2])
-
-        #     if tech2_number_of_systems == 0:
-        #         continue
-
-        #     tech1_data = self.gather_tech_performance(tech1, tech1_number_of_systems, sum(tech1_kW_gen_data))
-        #     tech2_data = self.gather_tech_performance(tech2, tech2_number_of_systems, sum(tech2_kW_gen_data))
-        #     combined_data = np.add(tech1_data, tech2_data)
-
-        #     self.tech_criteria_data.loc[f'{tech1_number_of_systems} {TECH_LABELS[tech1]}' + ('s' if tech1_number_of_systems > 1 else '') + ' & ' +
-        #         f'{tech2_number_of_systems} {TECH_LABELS[tech2]}' + ('s' if tech2_number_of_systems > 1 else '')] = combined_data
+    def get_EWOMP(self, system_output, kW_gen_data, hourly_loads, EWOMP_factors, gamma):
+        # T_l^t is just hourly_loads
+        # Create psi
+        unsuccessful_hours = np.where(system_output < kW_gen_data)[0]
+        psi = hourly_loads.copy()
+        for hour in unsuccessful_hours:
+            psi[hour].values[:] = 0
+        # Calculate log(gamma*psi+1)
+        delivered_value = psi.applymap(lambda x: np.log10(gamma*abs(x) + 1)).sum(axis=1)
+        # Calculate log(gamma*T_l^t+1)
+        demanded_value = hourly_loads.applymap(lambda x: np.log10(gamma*abs(x) + 1)).sum(axis=1)
+        # Calculate sum of ratio
+        value_ratios = delivered_value.divide(demanded_value)
+        # Multiply by EWOMP_factor/d
+        EWOMP_per_load = value_ratios.multiply(EWOMP_factors["EWOMP_factor"], fill_value=0) / len(system_output)
+        # Take the mean of this DataFrame column (equivalent to summing all these and dividing by ||L_RH||)
+        c_EWOMP = EWOMP_per_load.mean()
+        # Return
+        return c_EWOMP
     
     def find_non_dominated_options(self):
         if len(self.tech_criteria_data) == 0:
@@ -175,7 +139,7 @@ class TechnologyEvaluator():
         nd_option_filepath = Path(filepath + "_nd.csv")
         self.non_dominated_options.to_csv(nd_option_filepath)
         generated_option_filepath = Path(filepath + "_generated.csv")
-        generated_data = concat([self.tech_criteria_data, self.CNSP_failing_tech_criteria_data, self.oversized_tech_criteria_data])
+        generated_data = concat([self.tech_criteria_data, self.CNSP_failing_tech_criteria_data])
         generated_data.to_csv(generated_option_filepath)
 
         
