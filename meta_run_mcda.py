@@ -4,11 +4,9 @@ seasons = ["winter", "spring", "summer", "fall"]
 
 durations = ["short"]
 
-# DATE_FINDER = {"winter": {"short": (8184,8220), "long": (8184,8256)}, "spring": {"short": (3264,3300), "long": (3264,3336)}, "summer": {"short": (4776,4812), "long": (4776,4848)}, "fall": {"short": (5760,5796), "long": (5760,5832)}}
+RHs = {"RH0":2084}
 
-RHs = {"RH0":2084, "RH2":2112}
-
-load_sets = ["only", "small", "large"]
+load_sets = ["large"]
 
 for rh in RHs.keys():
     for load_set in load_sets:

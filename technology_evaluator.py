@@ -117,7 +117,7 @@ class TechnologyEvaluator():
         # Calculate sum of ratio
         value_ratios = delivered_value.divide(demanded_value)
         # Multiply by EWOMP_factor/d
-        EWOMP_per_load = value_ratios.multiply(EWOMP_factors["EWOMP_factor"], fill_value=0) / len(system_output)
+        EWOMP_per_load = value_ratios.multiply(EWOMP_factors["EWOMP_factor"], fill_value=0)# / len(system_output)
         # Take the mean of this DataFrame column (equivalent to summing all these and dividing by ||L_RH||)
         c_EWOMP = EWOMP_per_load.mean()
         # Return
