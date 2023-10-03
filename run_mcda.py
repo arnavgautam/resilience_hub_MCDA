@@ -83,7 +83,7 @@ def main(raw_args=None):
 
     print()
     print("Finding non-dominated options among technology options...")
-    tech_evaluator.find_non_dominated_options()
+    tech_evaluator.find_non_dominated_options(epsilons=None)#[0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1])
     if csvfilepath is not None:
         tech_evaluator.save(csvfilepath)
 

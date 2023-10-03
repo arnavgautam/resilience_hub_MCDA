@@ -18,7 +18,7 @@ class TechnologyEnumerator():
             single_tech_set = zero_tech_set.copy()
             single_tech_set[tech] = upfront_cost_ceiling // FIXED_COSTS[tech]
             self.tech_sets.append(single_tech_set)
-        max_tech_num = 17# upfront_cost_ceiling // min([FIXED_COSTS[t] for t in Technology])
+        max_tech_num = 21# upfront_cost_ceiling // min([FIXED_COSTS[t] for t in Technology])
         for i in range(max_tech_num):
             for j in range(max_tech_num):
                 for k in range(max_tech_num):

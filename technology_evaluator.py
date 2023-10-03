@@ -123,11 +123,11 @@ class TechnologyEvaluator():
         # Return
         return c_EWOMP
     
-    def find_non_dominated_options(self):
+    def find_non_dominated_options(self, epsilons=None):
         if len(self.tech_criteria_data) == 0:
             self.non_dominated_options = self.tech_criteria_data
             return
-        self.non_dominated_options = pareto.eps_sort([list(self.tech_criteria_data.itertuples())], list(self.tech_criteria_data.columns.map(self.tech_criteria_data.columns.get_loc).values + 1))
+        self.non_dominated_options = pareto.eps_sort([list(self.tech_criteria_data.itertuples())], objectives=list(self.tech_criteria_data.columns.map(self.tech_criteria_data.columns.get_loc).values + 1), epsilons=epsilons)
         column_list = ["Name", *self.tech_criteria_data.columns.values]
         # convert multi-dimension array to DataFrame
         self.non_dominated_options = DataFrame.from_records(self.non_dominated_options, columns=column_list, index="Name")
