@@ -19,10 +19,10 @@ def yield_constructed_args():
                                         f"{season}",
                                         f"{duration}",
                                         "510000",
-                                        "../Data/TPF Output/R1-12.47-2-with-RHs/",
-                                        "--svifilepath=../../Research/Data/richmond_ca_svi_values_r1_1247_2.csv",
+                                        "input/TPF Output/R1-12.47-2-with-RHs/",
+                                        "--svifilepath=input/richmond_ca_svi_values_r1_1247_2.csv",
                                         "--plotfolder=../../Part A/Images/Tradeoffs",
-                                        "--csvfolder=../../Part A/Data/R1-12.47-2-with-RHs/R_and_R",
+                                        "--csvfolder=output/R1-12.47-2-with-RHs/R_and_R",
                                     ]
                     yield constructed_args
 
