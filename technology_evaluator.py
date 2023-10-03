@@ -19,7 +19,7 @@ class TechnologyEvaluator():
     def compile_tech_outputs(self, start, end):
         self.tech_output_timeseries[Technology.SOFC] = [10000] * (end - start)
         self.tech_output_timeseries[Technology.DIESEL] = [10000] * (end - start)
-        self.tech_output_timeseries[Technology.SOLAR_STORAGE] = PVWATTS_HOURLY_8760["AC System Output (W)"][start:end].tolist() # Battery behavior is modeled separately
+        self.tech_output_timeseries[Technology.SOLAR_ONLY] = PVWATTS_HOURLY_8760["AC System Output (W)"][start:end].tolist() # Battery behavior is modeled separately
 
 
         # For solar + storage, we assume that max output is the battery discharging at max rate and the solar panel also sending its power to the grid
@@ -48,9 +48,17 @@ class TechnologyEvaluator():
             system_output = self.get_system_output_timeseries(tech_set, kW_gen_data, individual_tech_outputs)
             
             customer_not_supplied_probability = self.get_customer_not_supplied_probability(system_output, kW_gen_data)
+            
+            # # Add this back to speed up operations but remove data on systems needed to evaluate performance throughout the year
+            # if customer_not_supplied_probability > self.CNSP_THRESHOLD:
+            #     continue
+
             combined_data = None
             for tech, tech_number_of_systems in tech_set.items():
-                tech_data = self.gather_tech_performance(tech, tech_number_of_systems, sum(individual_tech_outputs[tech]), sum(system_output))
+                if tech_number_of_systems != 0:
+                    tech_data = self.gather_tech_performance(tech, tech_number_of_systems, sum(individual_tech_outputs[tech]), sum(system_output))
+                else:
+                    tech_data = [0, 0, 0, 0, 0]
                 if combined_data is None:
                     combined_data = tech_data
                 else:
@@ -75,13 +83,15 @@ class TechnologyEvaluator():
     def get_system_output_timeseries(self, tech_set, kW_gen_data, individual_tech_outputs):
         system_output = np.zeros(len(kW_gen_data))
         for tech in tech_set:
-            individual_tech_outputs[tech] = np.multiply(self.tech_output_timeseries[tech], tech_set[tech])
-            system_output += individual_tech_outputs[tech]
+            if tech in self.tech_output_timeseries.keys():
+                individual_tech_outputs[tech] = np.multiply(self.tech_output_timeseries[tech], tech_set[tech])
+                system_output += individual_tech_outputs[tech]
 
         # Adjust battery behavior as possible and as needed
-        if tech_set[Technology.SOLAR_STORAGE] > 0:
-            max_charge_rate = STORAGE_MAX_DISCHARGE_RATE * tech_set[Technology.SOLAR_STORAGE]
-            starting_energy_stored = STORAGE_ENERGY_CAPACITY * tech_set[Technology.SOLAR_STORAGE]
+        if tech_set[Technology.STORAGE_ONLY] > 0:
+            individual_tech_outputs[Technology.STORAGE_ONLY] = np.zeros(len(kW_gen_data))
+            max_charge_rate = STORAGE_MAX_DISCHARGE_RATE * tech_set[Technology.STORAGE_ONLY]
+            starting_energy_stored = STORAGE_ENERGY_CAPACITY * tech_set[Technology.STORAGE_ONLY]
             cumulative_energy = starting_energy_stored
             for i in range(len(kW_gen_data)):
                 present_generation = system_output[i]
@@ -89,11 +99,12 @@ class TechnologyEvaluator():
                 if needed_generation > present_generation and cumulative_energy > 0:
                     storage_outflow = min(needed_generation - present_generation, max_charge_rate, cumulative_energy)
                     cumulative_energy -= storage_outflow
-                    system_output[i] += storage_outflow
+                    individual_tech_outputs[Technology.STORAGE_ONLY][i] += storage_outflow
                 elif present_generation > needed_generation and cumulative_energy < starting_energy_stored:
                     storage_inflow = min(present_generation - needed_generation, max_charge_rate)
                     cumulative_energy = min(starting_energy_stored, cumulative_energy + storage_inflow)
-                    system_output[i] -= storage_inflow
+                    individual_tech_outputs[Technology.STORAGE_ONLY][i] -= storage_inflow
+            system_output += individual_tech_outputs[Technology.STORAGE_ONLY]
 
         return system_output
         
@@ -106,10 +117,21 @@ class TechnologyEvaluator():
     def get_EWOMP(self, system_output, kW_gen_data, hourly_loads, EWOMP_factors, gamma):
         # T_l^t is just hourly_loads
         # Create psi
-        unsuccessful_hours = np.where(system_output < kW_gen_data)[0]
+
+        # NEW psi where it's scaled down by the same percentage for everyone when all load not met
         psi = hourly_loads.copy()
-        for hour in unsuccessful_hours:
-            psi[hour].values[:] = 0
+        for hour in range(len(system_output)):
+            if kW_gen_data[hour] != 0 and system_output[hour] < kW_gen_data[hour]:
+                psi[hour].values[:] *= system_output[hour] / kW_gen_data[hour]
+
+
+        # OLD psi which was zero when all load not met
+        # unsuccessful_hours = np.where(system_output < kW_gen_data)[0]
+        # psi = hourly_loads.copy()
+        # for hour in unsuccessful_hours:
+        #     psi[hour].values[:] = 0
+
+        
         # Calculate log(gamma*psi+1)
         delivered_value = psi.applymap(lambda x: np.log10(gamma*abs(x) + 1)).sum(axis=1)
         # Calculate log(gamma*T_l^t+1)
