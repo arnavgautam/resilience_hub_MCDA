@@ -22,7 +22,7 @@ def yield_constructed_args():
                                         "input/TPF Output/R1-12.47-2-with-RHs/",
                                         "--svifilepath=input/richmond_ca_svi_values_r1_1247_2.csv",
                                         "--plotfolder=../../Part A/Images/Tradeoffs",
-                                        "--csvfolder=output/R1-12.47-2-with-RHs/R_and_R",
+                                        "--csvfolder=output/R1-12.47-2-with-RHs/R_and_R/",
                                     ]
                     yield constructed_args
 
